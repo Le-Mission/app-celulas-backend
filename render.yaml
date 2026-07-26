@@ -1,0 +1,30 @@
+services:
+  - type: web
+    name: le-mission-api
+    runtime: node
+    plan: starter
+    region: oregon
+    buildCommand: npm install && npx prisma db push --skip-generate && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: DATABASE_URL
+        sync: false
+      - key: DIRECT_DATABASE_URL
+        sync: false
+      - key: CLERK_PUBLISHABLE_KEY
+        sync: false
+      - key: CLERK_SECRET_KEY
+        sync: false
+      - key: CLERK_WEBHOOK_SECRET
+        sync: false
+      - key: WASABI_ACCESS_KEY_ID
+        sync: false
+      - key: WASABI_SECRET_ACCESS_KEY
+        sync: false
+      - key: ABACATEPAY_API_KEY
+        sync: false
