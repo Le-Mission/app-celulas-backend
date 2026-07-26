@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: le_mission
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_DB: le_mission_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://le_mission:test_password@localhost:5432/le_mission_test
+      DIRECT_DATABASE_URL: postgresql://le_mission:test_password@localhost:5432/le_mission_test
+      CLERK_PUBLISHABLE_KEY: pk_test_placeholder
+      CLERK_SECRET_KEY: sk_test_placeholder
+      WASABI_ACCESS_KEY_ID: placeholder
+      WASABI_SECRET_ACCESS_KEY: placeholder
+      WASABI_BUCKET: placeholder
+      ABACATEPAY_API_KEY: placeholder
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - run: npx prisma generate
+
+      - run: npx prisma migrate deploy
+
+      - run: npm run lint
+
+      - run: npm run typecheck
+
+      - run: npm test
+
+      - run: npm run build
+
+      - run: npx prisma validate
+
+      - run: docker compose config

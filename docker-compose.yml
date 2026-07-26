@@ -1,0 +1,20 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: le-mission-db
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: le_mission
+      POSTGRES_PASSWORD: le_mission_dev
+      POSTGRES_DB: le_mission
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U le_mission"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata:

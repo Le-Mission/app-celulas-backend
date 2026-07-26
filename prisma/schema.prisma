@@ -1,0 +1,568 @@
+// Prisma Schema for Le Mission Backend
+// Multi-tenant SaaS for church management
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_DATABASE_URL")
+}
+
+// =============================================================================
+// Enums
+// =============================================================================
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+enum OrgRole {
+  ORGANIZATION_OWNER
+  ORGANIZATION_ADMIN
+  BILLING_ADMIN
+  SUPPORT_ADMIN
+}
+
+enum ChurchRole {
+  CHURCH_ADMIN
+  PASTOR
+  LEADER
+  SECRETARY
+  TREASURER
+  MEMBER
+}
+
+enum CellRole {
+  LEADER
+  MEMBER
+}
+
+enum PlatformRole {
+  PLATFORM_OWNER
+  PLATFORM_ADMIN
+  PLATFORM_SUPPORT
+  PLATFORM_FINANCE
+  PLATFORM_READONLY
+}
+
+enum PlanCode {
+  SOLO
+  LOCAL
+  INSTITUTIONAL
+}
+
+enum PlanStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
+}
+
+enum BillingInterval {
+  MONTHLY
+  YEARLY
+  CUSTOM
+}
+
+enum FeatureValueType {
+  BOOLEAN
+  NUMBER
+  TEXT
+}
+
+enum LimitType {
+  FIXED
+  UNLIMITED
+  CUSTOM
+}
+
+enum SubscriptionStatus {
+  INCOMPLETE
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  SUSPENDED
+  CANCELED
+  EXPIRED
+}
+
+enum CheckoutStatus {
+  PENDING
+  COMPLETED
+  EXPIRED
+  CANCELED
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCEEDED
+  REFUNDED
+  DISPUTED
+  LOST
+}
+
+enum WebhookEventStatus {
+  RECEIVED
+  PROCESSING
+  PROCESSED
+  FAILED
+  IGNORED
+}
+
+enum MembershipScope {
+  ORGANIZATION
+  CHURCH
+  CELL
+}
+
+// =============================================================================
+// Core Models
+// =============================================================================
+
+model User {
+  id           String     @id @default(uuid()) @db.Uuid
+  clerkUserId  String     @unique
+  primaryEmail String
+  name         String
+  avatarUrl    String?
+  phone        String?
+  status       UserStatus @default(ACTIVE)
+  lastLoginAt  DateTime?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  orgMemberships      OrganizationMembership[]
+  churchMemberships   ChurchMembership[]
+  cellMemberships     CellMembership[]
+  auditLogs           AuditLog[]
+  uploadedFiles       FileObject[]
+  checkoutSessions    CheckoutSession[]
+  platformMemberships PlatformMembership[]
+}
+
+// =============================================================================
+// Tenancy Models
+// =============================================================================
+
+model Organization {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String
+  slug      String   @unique
+  status    String   @default("active")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  memberships      OrganizationMembership[]
+  churches         Church[]
+  billingAccount   BillingAccount?
+  subscriptions    Subscription[]
+  checkoutSessions CheckoutSession[]
+  payments         SaaSPayment[]
+  files            FileObject[]
+  auditLogs        AuditLog[]
+  usageCounters    UsageCounter[]
+}
+
+model OrganizationMembership {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @db.Uuid
+  userId         String   @db.Uuid
+  role           OrgRole
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, userId])
+  @@index([userId])
+}
+
+model Church {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @db.Uuid
+  name           String
+  slug           String
+  status         String   @default("active")
+  timezone       String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  memberships  ChurchMembership[]
+  cells        Cell[]
+  files        FileObject[]
+  auditLogs    AuditLog[]
+
+  @@unique([organizationId, slug])
+  @@index([organizationId])
+}
+
+model ChurchMembership {
+  id        String     @id @default(uuid()) @db.Uuid
+  churchId  String     @db.Uuid
+  userId    String     @db.Uuid
+  role      ChurchRole
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  church Church @relation(fields: [churchId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([churchId, userId])
+  @@index([userId])
+}
+
+// =============================================================================
+// Cell Models
+// =============================================================================
+
+model Cell {
+  id          String   @id @default(uuid()) @db.Uuid
+  churchId    String   @db.Uuid
+  name        String
+  description String?
+  leaderId    String?  @db.Uuid
+  meetingDay  String?
+  meetingTime String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  church      Church           @relation(fields: [churchId], references: [id], onDelete: Cascade)
+  memberships CellMembership[]
+
+  @@index([churchId])
+}
+
+model CellMembership {
+  id        String   @id @default(uuid()) @db.Uuid
+  cellId    String   @db.Uuid
+  userId    String   @db.Uuid
+  role      CellRole
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  cell Cell @relation(fields: [cellId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([cellId, userId])
+  @@index([userId])
+}
+
+// =============================================================================
+// RBAC Models
+// =============================================================================
+
+model Role {
+  id          String          @id @default(uuid()) @db.Uuid
+  name        String
+  scope       MembershipScope
+  description String?
+  createdAt   DateTime        @default(now())
+
+  permissions RolePermission[]
+}
+
+model Permission {
+  id          String   @id @default(uuid()) @db.Uuid
+  key         String   @unique
+  description String?
+  createdAt   DateTime @default(now())
+
+  roles RolePermission[]
+}
+
+model RolePermission {
+  id           String @id @default(uuid()) @db.Uuid
+  roleId       String @db.Uuid
+  permissionId String @db.Uuid
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permissionId])
+  @@index([permissionId])
+}
+
+// =============================================================================
+// Platform Admin Models
+// =============================================================================
+
+model PlatformMembership {
+  id        String       @id @default(uuid()) @db.Uuid
+  userId    String       @db.Uuid
+  role      PlatformRole
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId])
+}
+
+// =============================================================================
+// Billing Models
+// =============================================================================
+
+model Plan {
+  id              String          @id @default(uuid()) @db.Uuid
+  code            PlanCode        @unique
+  name            String
+  description     String?
+  status          PlanStatus      @default(DRAFT)
+  billingInterval BillingInterval
+  priceInCents    Int?
+  currency        String          @default("BRL")
+  trialDays       Int             @default(0)
+  isPublic        Boolean         @default(false)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  features                PlanFeature[]
+  subscriptions           Subscription[]
+  paymentProviderProducts PaymentProviderProduct[]
+  checkoutSessions        CheckoutSession[]
+}
+
+model PlanFeature {
+  id           String           @id @default(uuid()) @db.Uuid
+  planId       String           @db.Uuid
+  featureKey   String
+  valueType    FeatureValueType
+  limitType    LimitType?
+  booleanValue Boolean?
+  numericValue BigInt?
+  textValue    String?
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  plan Plan @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  @@unique([planId, featureKey])
+  @@index([featureKey])
+}
+
+model BillingAccount {
+  id                 String   @id @default(uuid()) @db.Uuid
+  organizationId     String   @unique @db.Uuid
+  provider           String   @default("abacatepay")
+  externalCustomerId String?
+  billingEmail       String
+  legalName          String?
+  taxIdEncrypted     String?
+  status             String   @default("active")
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  organization  Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  subscriptions Subscription[]
+}
+
+model Subscription {
+  id                     String             @id @default(uuid()) @db.Uuid
+  organizationId         String             @db.Uuid
+  billingAccountId       String             @db.Uuid
+  planId                 String             @db.Uuid
+  provider               String             @default("abacatepay")
+  externalSubscriptionId String?
+  status                 SubscriptionStatus @default(INCOMPLETE)
+  billingInterval        BillingInterval
+  currentPeriodStart     DateTime?
+  currentPeriodEnd       DateTime?
+  trialStartedAt         DateTime?
+  trialEndsAt            DateTime?
+  canceledAt             DateTime?
+  cancelAtPeriodEnd      Boolean            @default(false)
+  gracePeriodEndsAt      DateTime?
+  createdAt              DateTime           @default(now())
+  updatedAt              DateTime           @updatedAt
+
+  organization     Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  billingAccount   BillingAccount    @relation(fields: [billingAccountId], references: [id], onDelete: Cascade)
+  plan             Plan              @relation(fields: [planId], references: [id], onDelete: Cascade)
+  checkoutSessions CheckoutSession[]
+  payments         SaaSPayment[]
+
+  @@index([organizationId])
+  @@index([externalSubscriptionId])
+}
+
+model CheckoutSession {
+  id                 String         @id @default(uuid()) @db.Uuid
+  organizationId     String         @db.Uuid
+  subscriptionId     String?        @db.Uuid
+  planId             String         @db.Uuid
+  provider           String         @default("abacatepay")
+  externalCheckoutId String
+  externalUrl        String
+  status             CheckoutStatus @default(PENDING)
+  expiresAt          DateTime?
+  createdByUserId    String         @db.Uuid
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+
+  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  subscription Subscription? @relation(fields: [subscriptionId], references: [id])
+  plan         Plan          @relation(fields: [planId], references: [id], onDelete: Cascade)
+  creator      User          @relation(fields: [createdByUserId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([externalCheckoutId])
+}
+
+model SaaSPayment {
+  id                 String        @id @default(uuid()) @db.Uuid
+  organizationId     String        @db.Uuid
+  subscriptionId     String?       @db.Uuid
+  provider           String        @default("abacatepay")
+  externalPaymentId  String
+  externalCheckoutId String?
+  amountInCents      Int
+  paidAmountInCents  Int?
+  platformFeeInCents Int?
+  currency           String        @default("BRL")
+  method             String?
+  status             PaymentStatus @default(PENDING)
+  paidAt             DateTime?
+  refundedAt         DateTime?
+  disputedAt         DateTime?
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  subscription Subscription? @relation(fields: [subscriptionId], references: [id])
+
+  @@index([organizationId])
+  @@index([externalPaymentId])
+}
+
+model PaymentProviderProduct {
+  id                String   @id @default(uuid()) @db.Uuid
+  provider          String   @default("abacatepay")
+  planId            String   @db.Uuid
+  externalProductId String
+  externalPriceId   String?
+  environment       String   @default("development")
+  status            String   @default("active")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  plan Plan @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, externalProductId])
+  @@index([planId])
+}
+
+// =============================================================================
+// Webhook Models
+// =============================================================================
+
+model WebhookEvent {
+  id              String             @id @default(uuid()) @db.Uuid
+  provider        String
+  externalEventId String
+  eventType       String
+  apiVersion      String?
+  environment     String?
+  payloadJson     String
+  payloadHash     String?
+  status          WebhookEventStatus @default(RECEIVED)
+  attempts        Int                @default(0)
+  receivedAt      DateTime           @default(now())
+  processedAt     DateTime?
+  failureReason   String?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  @@unique([provider, externalEventId])
+  @@index([status])
+}
+
+// =============================================================================
+// File Models
+// =============================================================================
+
+model FileObject {
+  id               String   @id @default(uuid()) @db.Uuid
+  organizationId   String   @db.Uuid
+  churchId         String?  @db.Uuid
+  entityType       String
+  entityId         String?
+  filename         String
+  mimeType         String?
+  sizeInBytes      BigInt
+  storageKey       String
+  uploadedByUserId String   @db.Uuid
+  createdAt        DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  church       Church?      @relation(fields: [churchId], references: [id])
+  uploader     User         @relation(fields: [uploadedByUserId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([churchId])
+}
+
+// =============================================================================
+// Audit Models
+// =============================================================================
+
+model AuditLog {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String?  @db.Uuid
+  churchId       String?  @db.Uuid
+  actorUserId    String?  @db.Uuid
+  actorType      String
+  action         String
+  entityType     String
+  entityId       String?
+  beforeJson     String?
+  afterJson      String?
+  metadataJson   String?
+  requestId      String
+  ipHash         String?
+  userAgent      String?
+  createdAt      DateTime @default(now())
+
+  organization Organization? @relation(fields: [organizationId], references: [id])
+  church       Church?       @relation(fields: [churchId], references: [id])
+  actor        User?         @relation(fields: [actorUserId], references: [id])
+
+  @@index([organizationId])
+  @@index([createdAt])
+}
+
+// =============================================================================
+// Usage & Outbox Models
+// =============================================================================
+
+model UsageCounter {
+  id             String    @id @default(uuid()) @db.Uuid
+  organizationId String    @db.Uuid
+  metricKey      String
+  value          BigInt    @default(0)
+  periodStart    DateTime?
+  periodEnd      DateTime?
+  updatedAt      DateTime  @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, metricKey])
+}
+
+model OutboxEvent {
+  id            String    @id @default(uuid()) @db.Uuid
+  aggregateType String
+  aggregateId   String
+  eventType     String
+  payload       String
+  occurredAt    DateTime  @default(now())
+  processedAt   DateTime?
+  attempts      Int       @default(0)
+
+  @@index([processedAt])
+}
